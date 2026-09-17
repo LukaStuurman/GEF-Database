@@ -87,24 +87,10 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          $notes = @"
-          ## GEF Viewer Desktop ${{ steps.version.outputs.version }}
-
-          ### Nieuw
-          - Optionele DINOloket-laag voor boormonsterprofielen.
-          - Boormonsterlocaties tonen binnen een instelbare straal.
-          - Exacte afstandsfiltering binnen de gekozen cirkel.
-          - Directe CSV- en GEF-download per DINO/NITG-locatie.
-          - Ondersteuning voor plaats zoeken als middelpunt van de DINO-selectie.
-          - Paginering en bescherming tegen zeer grote selecties.
-
-          De bestaande lokale GEF-functionaliteit en kaartselecties blijven behouden.
-          "@
-
           gh release create "${{ steps.version.outputs.tag }}" `
             "release/GEF-Viewer-Desktop-${{ steps.version.outputs.version }}-x64-Portable.exe" `
             "release/GEF-Viewer-Desktop-${{ steps.version.outputs.version }}-x64-Installer.exe" `
             --repo "${{ github.repository }}" `
             --target "${{ github.sha }}" `
             --title "GEF Viewer Desktop ${{ steps.version.outputs.version }}" `
-            --notes $notes
+            --generate-notes
