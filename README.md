@@ -101,8 +101,10 @@ application data directory and is reused on subsequent starts.
 
 Release notes and checksums are in
 [`release-v1.3.0/RELEASE-NOTES-v1.3.0.md`](release-v1.3.0/RELEASE-NOTES-v1.3.0.md).
-The installer and portable executable are distributed as GitHub release
-assets so the source repository remains lightweight.
+The installer and portable executable were built and verified locally. They
+are intentionally kept out of the source tree because each Windows binary is
+around 90 MB; attach the two files from the local `release-v1.3.0` folder to a
+GitHub Release when distributing installers.
 
 ## Deployment
 
