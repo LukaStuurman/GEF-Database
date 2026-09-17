@@ -1,0 +1,40 @@
+{
+  "name": "Bedrock GEF Bestand Viewer - Sondering & Boring Visualisatie",
+  "short_name": "GEF Viewer",
+  "description": "Gratis online GEF viewer voor geotechnisch ingenieurs. Bekijk CPT sondeergegevens en boorprofielen van BRO en DOV. Ondersteunt GEF-CPT en GEF-BORE formaten.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#5d7a5a",
+  "lang": "nl-NL",
+  "categories": [
+    "utilities",
+    "productivity",
+    "business"
+  ],
+  "icons": [
+    {
+      "src": "/favicon-192x192.png",
+      "type": "image/png",
+      "sizes": "192x192",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/favicon-512x512.png",
+      "type": "image/png",
+      "sizes": "512x512",
+      "purpose": "any maskable"
+    }
+  ],
+  "file_handlers": [
+    {
+      "action": "/",
+      "accept": {
+        "application/octet-stream": [
+          ".gef",
+          ".GEF"
+        ]
+      }
+    }
+  ]
+}

@@ -1,0 +1,36 @@
+.DS_Store
+/node_modules/
+
+# React Router
+/.react-router/
+/build/
+
+# Electron build output and local release artifacts
+/release/
+/release-v*/
+/win-unpacked/
+/*.asar
+/manual-package-*/
+/asar-inspect/
+/codex-builder-shim/
+/.tools/
+
+TODO.md
+
+# Test GEF files
+/gefs/
+
+# Claude Code
+.claude/
+CLAUDE.md
+
+# Cloudflare
+.mf
+.wrangler
+.dev.vars*
+worker-configuration.d.ts
+
+
+!.dev.vars.example
+!.env.example
+
