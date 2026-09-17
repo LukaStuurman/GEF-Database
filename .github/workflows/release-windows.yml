@@ -1,0 +1,109 @@
+name: Release Windows
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "package.json"
+      - "app/**"
+      - "electron/**"
+      - "src/**"
+      - ".github/workflows/release-windows.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Read version
+        id: version
+        shell: pwsh
+        run: |
+          $version = node -p "require('./package.json').version"
+          "version=$version" >> $env:GITHUB_OUTPUT
+          "tag=v$version" >> $env:GITHUB_OUTPUT
+
+      - name: Check whether release exists
+        id: existing
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view "${{ steps.version.outputs.tag }}" --repo "${{ github.repository }}" *> $null
+          if ($LASTEXITCODE -eq 0) {
+            "exists=true" >> $env:GITHUB_OUTPUT
+          } else {
+            "exists=false" >> $env:GITHUB_OUTPUT
+          }
+          exit 0
+
+      - name: Install dependencies
+        if: steps.existing.outputs.exists != 'true'
+        run: npm ci
+
+      - name: Typecheck
+        if: steps.existing.outputs.exists != 'true'
+        run: npm run typecheck
+
+      - name: Build web assets
+        if: steps.existing.outputs.exists != 'true'
+        run: npm run build
+
+      - name: Build portable Windows executable
+        if: steps.existing.outputs.exists != 'true'
+        shell: pwsh
+        run: |
+          npx electron-builder --win portable --x64 --publish never
+          $generated = Get-ChildItem -Path release -Filter "*.exe" | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+          if (-not $generated) { throw "Portable executable was not generated." }
+          Move-Item -Path $generated.FullName -Destination "release/GEF-Viewer-Desktop-${{ steps.version.outputs.version }}-x64-Portable.exe" -Force
+
+      - name: Build Windows installer
+        if: steps.existing.outputs.exists != 'true'
+        shell: pwsh
+        run: |
+          npx electron-builder --win nsis --x64 --publish never
+          $generated = Get-ChildItem -Path release -Filter "*.exe" | Where-Object { $_.Name -notlike "*Portable.exe" } | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+          if (-not $generated) { throw "NSIS installer was not generated." }
+          Move-Item -Path $generated.FullName -Destination "release/GEF-Viewer-Desktop-${{ steps.version.outputs.version }}-x64-Installer.exe" -Force
+
+      - name: Publish GitHub release
+        if: steps.existing.outputs.exists != 'true'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $notes = @"
+          ## GEF Viewer Desktop ${{ steps.version.outputs.version }}
+
+          ### Nieuw
+          - Optionele DINOloket-laag voor boormonsterprofielen.
+          - Boormonsterlocaties tonen binnen een instelbare straal.
+          - Exacte afstandsfiltering binnen de gekozen cirkel.
+          - Directe CSV- en GEF-download per DINO/NITG-locatie.
+          - Ondersteuning voor plaats zoeken als middelpunt van de DINO-selectie.
+          - Paginering en bescherming tegen zeer grote selecties.
+
+          De bestaande lokale GEF-functionaliteit en kaartselecties blijven behouden.
+          "@
+
+          gh release create "${{ steps.version.outputs.tag }}" `
+            "release/GEF-Viewer-Desktop-${{ steps.version.outputs.version }}-x64-Portable.exe" `
+            "release/GEF-Viewer-Desktop-${{ steps.version.outputs.version }}-x64-Installer.exe" `
+            --repo "${{ github.repository }}" `
+            --target "${{ github.sha }}" `
+            --title "GEF Viewer Desktop ${{ steps.version.outputs.version }}" `
+            --notes $notes
