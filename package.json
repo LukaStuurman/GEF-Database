@@ -2,7 +2,7 @@
   "name": "gef-viewer-desktop",
   "description": "Windows desktop application for viewing Geotechnical Exchange Format (GEF) files",
   "homepage": "https://github.com/LukaStuurman/GEF-Database",
-  "version": "1.4.0",
+  "version": "1.4.1",
   "main": "electron/main.cjs",
   "author": {
     "name": "Jules Blom",
