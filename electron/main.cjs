@@ -22,10 +22,21 @@ const DATASET_STAT_CONCURRENCY = 48;
 const DATASET_INDEX_CONCURRENCY = 12;
 const PORTABLE_DATA_DIRECTORY_NAME = "GEF Viewer Desktop Data";
 const PORTABLE_STATE_PATH_PREFIX = "__PORTABLE__:";
-const DEFAULT_BACKUP_DIRECTORY = String.raw`C:\Users\LukaStuurmanHDBTechb\Techbase\Techbase - Documenten\Tekenkamer\Techbase WES\2. Handleidingen\1. Sleufloze techniek\Sleufloze techniek data\Sonderingen\GEF`;
-const OPENSTREETMAP_APP_REFERER = "https://github.com/bedrock-engineer/gef-app";
+const DEFAULT_BACKUP_DIRECTORY = path.join(
+  process.env.USERPROFILE || process.env.HOME || "",
+  "Techbase",
+  "Techbase - Documenten",
+  "Tekenkamer",
+  "Techbase WES",
+  "2. Handleidingen",
+  "1. Sleufloze techniek",
+  "Sleufloze techniek data",
+  "Sonderingen",
+  "GEF",
+);
+const OPENSTREETMAP_APP_REFERER = "https://github.com/LukaStuurman/GEF-Database";
 const OPENSTREETMAP_APP_USER_AGENT =
-  "GEF Viewer Desktop/1.3.0 (+https://github.com/bedrock-engineer/gef-app)";
+  "GEF Viewer Desktop/1.3.0 (+https://github.com/LukaStuurman/GEF-Database)";
 const BORE_TYPE_HINT_KEYWORDS = [
   "bore",
   "boor",
