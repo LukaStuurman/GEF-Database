@@ -262,8 +262,9 @@ export default {
       "{{count}} GEF-bestanden binnen {{radius}} km zijn geselecteerd.",
     mapRadiusSelectNone:
       "Geen GEF-locaties gevonden binnen een straal van {{radius}} km.",
-    mapNearbyFiles: "{{count}} GEF-locaties binnen 10 km",
-    mapNearbyFilesNone: "Geen GEF-locaties gevonden binnen 10 km.",
+    mapNearbyFiles: "{{count}} GEF-locaties binnen {{radius}} km",
+    mapNearbyFilesNone:
+      "Geen GEF-locaties gevonden binnen {{radius}} km.",
     mapNearbyFilesMore: "De 12 dichtstbijzijnde locaties worden getoond.",
 
     // Bore PDF export

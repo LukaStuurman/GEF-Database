@@ -258,8 +258,9 @@ export default {
       "{{count}} GEF files within {{radius}} km were selected.",
     mapRadiusSelectNone:
       "No GEF locations were found within a radius of {{radius}} km.",
-    mapNearbyFiles: "{{count}} GEF locations within 10 km",
-    mapNearbyFilesNone: "No GEF locations were found within 10 km.",
+    mapNearbyFiles: "{{count}} GEF locations within {{radius}} km",
+    mapNearbyFilesNone:
+      "No GEF locations were found within {{radius}} km.",
     mapNearbyFilesMore: "The 12 nearest locations are shown.",
 
     // Bore PDF export

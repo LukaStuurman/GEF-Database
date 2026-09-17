@@ -72,7 +72,6 @@ const DEFAULT_CENTER: LatLngExpression = [52.1326, 5.2913];
 const DEFAULT_ZOOM = 7;
 const SELECTED_LOCATION_ZOOM = 15;
 const MARKER_BATCH_SIZE = 300;
-const NEARBY_LOCATION_RADIUS_KM = 10;
 const MAX_VISIBLE_NEARBY_LOCATIONS = 12;
 const MAX_VISIBLE_DINO_LOCATIONS = 20;
 const DINO_QUERY_PAGE_SIZE = 2000;
@@ -212,9 +211,9 @@ export function GefMap({
           file.wgs84.lon,
         ),
       }))
-      .filter((location) => location.distanceKm <= NEARBY_LOCATION_RADIUS_KM)
+      .filter((location) => location.distanceKm <= selectionRadiusKm)
       .sort((left, right) => left.distanceKm - right.distanceKm);
-  }, [focusedSearchResult, locations]);
+  }, [focusedSearchResult, locations, selectionRadiusKm]);
   const addPdfSelection = useEffectEvent((filenames: Array<string>) => {
     onAddPdfSelection(filenames);
   });
@@ -1150,8 +1149,17 @@ export function GefMap({
         <div className="rounded-sm border border-gray-200 bg-white">
           <div className="border-b border-gray-100 px-3 py-2 text-xs font-medium text-gray-700">
             {nearbyLocations.length > 0
-              ? t("mapNearbyFiles", { count: nearbyLocations.length })
-              : t("mapNearbyFilesNone")}
+              ? t("mapNearbyFiles", {
+                  count: nearbyLocations.length,
+                  radius: selectionRadiusKm.toLocaleString(i18n.language, {
+                    maximumFractionDigits: 2,
+                  }),
+                })
+              : t("mapNearbyFilesNone", {
+                  radius: selectionRadiusKm.toLocaleString(i18n.language, {
+                    maximumFractionDigits: 2,
+                  }),
+                })}
           </div>
 
           {nearbyLocations
