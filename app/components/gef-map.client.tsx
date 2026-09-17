@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/no-non-null-assertion */
-import { SearchIcon } from "lucide-react";
+import { DownloadIcon, SearchIcon } from "lucide-react";
 import markerIcon2xUrl from "leaflet/dist/images/marker-icon-2x.png";
 import markerIconUrl from "leaflet/dist/images/marker-icon.png";
 import markerShadowUrl from "leaflet/dist/images/marker-shadow.png";
@@ -41,12 +41,48 @@ interface NearbyLocation {
   distanceKm: number;
 }
 
+interface DinoBoreholeLocation {
+  dinoNumber: string;
+  lat: number;
+  lon: number;
+  sampleProfileCount: number | null;
+  distanceKm: number;
+}
+
+interface DinoGeoJsonFeature {
+  type: "Feature";
+  geometry: {
+    type: "Point";
+    coordinates: [number, number];
+  } | null;
+  properties: Record<string, unknown> | null;
+}
+
+interface DinoGeoJsonResponse {
+  type?: string;
+  features?: Array<DinoGeoJsonFeature>;
+  exceededTransferLimit?: boolean;
+  error?: {
+    code?: number;
+    message?: string;
+  };
+}
+
 const DEFAULT_CENTER: LatLngExpression = [52.1326, 5.2913];
 const DEFAULT_ZOOM = 7;
 const SELECTED_LOCATION_ZOOM = 15;
 const MARKER_BATCH_SIZE = 300;
 const NEARBY_LOCATION_RADIUS_KM = 10;
 const MAX_VISIBLE_NEARBY_LOCATIONS = 12;
+const MAX_VISIBLE_DINO_LOCATIONS = 20;
+const DINO_QUERY_PAGE_SIZE = 2000;
+const DINO_MAX_RESULTS = 10000;
+const DINO_MAPSERVER_QUERY_URL =
+  "https://www.broloket.nl/standalone/rest/services/uitgifteloket_gdn/lks_gbo_rd_v1/MapServer/0/query";
+const DINO_PROFILE_CSV_DOWNLOAD_BASE_URL =
+  "https://www.dinoloket.nl/uitgifteloket/api/brh/sampledescription/csv";
+const DINO_PROFILE_GEF_DOWNLOAD_BASE_URL =
+  "https://www.dinoloket.nl/uitgifteloket/api/brh/gef";
 const searchResultIcon = L.icon({
   iconRetinaUrl: markerIcon2xUrl,
   iconUrl: markerIconUrl,
@@ -71,9 +107,47 @@ export function GefMap({
   }
 
   const { t, i18n } = useTranslation();
+  const isDutch = i18n.language.toLowerCase().startsWith("nl");
+  const dinoText = useMemo(
+    () =>
+      isDutch
+        ? {
+            enable: "DINOloket boormonsters tonen",
+            disable: "DINOloket boormonsters verbergen",
+            hint: "Klik op de kaart om het middelpunt te kiezen. DINOloket-boormonsterprofielen binnen de ingestelde straal worden geladen.",
+            loading: "DINOloket boormonsters laden…",
+            error: "DINOloket boormonsters konden niet worden geladen.",
+            empty: "Geen openbare DINOloket-boormonsterprofielen gevonden binnen deze straal.",
+            count: (count: number) => `${count} DINOloket-boormonster${count === 1 ? "" : "s"} binnen de straal`,
+            truncated: `Er zijn meer dan ${DINO_MAX_RESULTS.toLocaleString("nl-NL")} resultaten. Verklein de straal om alle locaties te zien.`,
+            more: "Meer locaties zijn op de kaart zichtbaar.",
+            csv: "CSV",
+            gef: "GEF",
+            source: "DINO / DINOloket",
+            samples: "profielen",
+          }
+        : {
+            enable: "Show DINOloket bore samples",
+            disable: "Hide DINOloket bore samples",
+            hint: "Click the map to choose the centre. DINOloket sample-description locations inside the configured radius will be loaded.",
+            loading: "Loading DINOloket bore samples…",
+            error: "DINOloket bore samples could not be loaded.",
+            empty: "No public DINOloket sample-description locations were found inside this radius.",
+            count: (count: number) => `${count} DINOloket bore sample${count === 1 ? "" : "s"} inside the radius`,
+            truncated: `There are more than ${DINO_MAX_RESULTS.toLocaleString("en-US")} results. Reduce the radius to see every location.`,
+            more: "More locations are visible on the map.",
+            csv: "CSV",
+            gef: "GEF",
+            source: "DINO / DINOloket",
+            samples: "profiles",
+          },
+    [isDutch],
+  );
   const mapRef = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<LeafletMap>(null);
   const markersRef = useRef<Map<string, CircleMarker>>(new Map());
+  const dinoMarkersRef = useRef<Map<string, CircleMarker>>(new Map());
+  const dinoRequestIdRef = useRef(0);
   const previousLocationCountRef = useRef(0);
   const searchMarkerRef = useRef<Marker | null>(null);
   const selectionRectangleRef = useRef<Rectangle | null>(null);
@@ -96,6 +170,13 @@ export function GefMap({
     useState(false);
   const [selectionRadiusKm, setSelectionRadiusKm] = useState(1);
   const [selectionMessage, setSelectionMessage] = useState<string | null>(null);
+  const [showDinoBoreholes, setShowDinoBoreholes] = useState(false);
+  const [dinoBoreholes, setDinoBoreholes] = useState<Array<DinoBoreholeLocation>>(
+    [],
+  );
+  const [isLoadingDinoBoreholes, setIsLoadingDinoBoreholes] = useState(false);
+  const [dinoBoreholeError, setDinoBoreholeError] = useState<string | null>(null);
+  const [dinoResultsTruncated, setDinoResultsTruncated] = useState(false);
 
   const locations = useMemo(
     () =>
@@ -140,6 +221,45 @@ export function GefMap({
   const setPdfSelection = useEffectEvent((filenames: Array<string>) => {
     onSetPdfSelection(filenames);
   });
+  const loadDinoBoreholes = useEffectEvent(async (center: L.LatLng) => {
+    if (!showDinoBoreholes) {
+      return;
+    }
+
+    const requestId = dinoRequestIdRef.current + 1;
+    dinoRequestIdRef.current = requestId;
+    setIsLoadingDinoBoreholes(true);
+    setDinoBoreholeError(null);
+    setDinoResultsTruncated(false);
+
+    try {
+      const result = await fetchDinoBoreholesWithinRadius(
+        center.lat,
+        center.lng,
+        selectionRadiusKm,
+      );
+
+      if (dinoRequestIdRef.current !== requestId) {
+        return;
+      }
+
+      setDinoBoreholes(result.locations);
+      setDinoResultsTruncated(result.truncated);
+    } catch (error) {
+      console.error("Failed to load DINOloket boreholes", error);
+
+      if (dinoRequestIdRef.current !== requestId) {
+        return;
+      }
+
+      setDinoBoreholes([]);
+      setDinoBoreholeError(dinoText.error);
+    } finally {
+      if (dinoRequestIdRef.current === requestId) {
+        setIsLoadingDinoBoreholes(false);
+      }
+    }
+  });
   const applyRadiusSelection = useEffectEvent((center: L.LatLng) => {
     const map = mapInstanceRef.current;
 
@@ -180,12 +300,18 @@ export function GefMap({
               maximumFractionDigits: 2,
             }),
           })
-        : t("mapRadiusSelectNone", {
-            radius: selectionRadiusKm.toLocaleString(i18n.language, {
-              maximumFractionDigits: 2,
+        : showDinoBoreholes
+          ? dinoText.hint
+          : t("mapRadiusSelectNone", {
+              radius: selectionRadiusKm.toLocaleString(i18n.language, {
+                maximumFractionDigits: 2,
+              }),
             }),
-          }),
     );
+
+    if (showDinoBoreholes) {
+      void loadDinoBoreholes(center);
+    }
   });
 
   useEffect(() => {
@@ -212,6 +338,8 @@ export function GefMap({
     return () => {
       markersRef.current.forEach((marker) => marker.remove());
       markersRef.current.clear();
+      dinoMarkersRef.current.forEach((marker) => marker.remove());
+      dinoMarkersRef.current.clear();
       searchMarkerRef.current?.remove();
       searchMarkerRef.current = null;
       selectionRectangleRef.current?.remove();
@@ -241,7 +369,9 @@ export function GefMap({
       }
 
       previousLocationCountRef.current = 0;
-      map.setView(DEFAULT_CENTER, DEFAULT_ZOOM);
+      if (!showDinoBoreholes) {
+        map.setView(DEFAULT_CENTER, DEFAULT_ZOOM);
+      }
       return;
     }
 
@@ -359,7 +489,103 @@ export function GefMap({
         window.clearTimeout(timeoutId);
       }
     };
-  }, [locations, onMarkerClick]);
+  }, [locations, onMarkerClick, showDinoBoreholes]);
+
+  useEffect(() => {
+    const map = mapInstanceRef.current;
+
+    if (!map) {
+      return;
+    }
+
+    dinoMarkersRef.current.forEach((marker) => marker.remove());
+    dinoMarkersRef.current.clear();
+
+    if (!showDinoBoreholes) {
+      return;
+    }
+
+    let timeoutId: number | null = null;
+    let isCancelled = false;
+
+    const addMarker = (location: DinoBoreholeLocation) => {
+      const marker = L.circleMarker([location.lat, location.lon], {
+        radius: 7,
+        fillColor: "#0891b2",
+        color: "#164e63",
+        weight: 2,
+        opacity: 1,
+        fillOpacity: 0.9,
+      }).addTo(map);
+
+      const csvUrl = createDinoDownloadUrl(
+        DINO_PROFILE_CSV_DOWNLOAD_BASE_URL,
+        location.dinoNumber,
+      );
+      const gefUrl = createDinoDownloadUrl(
+        DINO_PROFILE_GEF_DOWNLOAD_BASE_URL,
+        location.dinoNumber,
+      );
+      const profileCount =
+        location.sampleProfileCount === null
+          ? ""
+          : `<br/>${escapeHtml(String(location.sampleProfileCount))} ${escapeHtml(dinoText.samples)}`;
+
+      marker.bindPopup(`
+        <div class="text-xs">
+          <strong>${escapeHtml(location.dinoNumber)}</strong><br/>
+          ${escapeHtml(dinoText.source)} · ${formatDistance(location.distanceKm)}${profileCount}<br/>
+          <a href="${escapeHtml(csvUrl)}" target="_blank" rel="noreferrer">${escapeHtml(dinoText.csv)}</a>
+          &nbsp;·&nbsp;
+          <a href="${escapeHtml(gefUrl)}" target="_blank" rel="noreferrer">${escapeHtml(dinoText.gef)}</a>
+        </div>
+      `);
+
+      dinoMarkersRef.current.set(location.dinoNumber, marker);
+    };
+
+    const addMarkerBatch = (startIndex: number) => {
+      if (isCancelled) {
+        return;
+      }
+
+      const endIndex = Math.min(
+        startIndex + MARKER_BATCH_SIZE,
+        dinoBoreholes.length,
+      );
+
+      for (let index = startIndex; index < endIndex; index += 1) {
+        addMarker(dinoBoreholes[index]!);
+      }
+
+      if (endIndex < dinoBoreholes.length) {
+        timeoutId = window.setTimeout(() => addMarkerBatch(endIndex), 0);
+      }
+    };
+
+    addMarkerBatch(0);
+
+    return () => {
+      isCancelled = true;
+      if (timeoutId !== null) {
+        window.clearTimeout(timeoutId);
+      }
+      dinoMarkersRef.current.forEach((marker) => marker.remove());
+      dinoMarkersRef.current.clear();
+    };
+  }, [dinoBoreholes, dinoText, showDinoBoreholes]);
+
+  useEffect(() => {
+    if (showDinoBoreholes) {
+      return;
+    }
+
+    dinoRequestIdRef.current += 1;
+    setDinoBoreholes([]);
+    setDinoBoreholeError(null);
+    setDinoResultsTruncated(false);
+    setIsLoadingDinoBoreholes(false);
+  }, [showDinoBoreholes]);
 
   useEffect(() => {
     if (!mapInstanceRef.current) {
@@ -570,7 +796,7 @@ export function GefMap({
 
     container.style.cursor = "crosshair";
     map.dragging.enable();
-    setSelectionMessage(t("mapRadiusSelectHint"));
+    setSelectionMessage(showDinoBoreholes ? dinoText.hint : t("mapRadiusSelectHint"));
 
     const handleMapClick = (event: LeafletMouseEvent) => {
       applyRadiusSelection(event.latlng);
@@ -585,7 +811,7 @@ export function GefMap({
       radiusSelectionCircleRef.current = null;
       radiusSelectionCenterRef.current = null;
     };
-  }, [isRadiusSelectionEnabled, t]);
+  }, [dinoText.hint, isRadiusSelectionEnabled, showDinoBoreholes, t]);
 
   useEffect(() => {
     if (!isRadiusSelectionEnabled || !radiusSelectionCenterRef.current) {
@@ -593,7 +819,7 @@ export function GefMap({
     }
 
     applyRadiusSelection(radiusSelectionCenterRef.current);
-  }, [isRadiusSelectionEnabled, locations, selectionRadiusKm]);
+  }, [isRadiusSelectionEnabled, locations, selectionRadiusKm, showDinoBoreholes]);
 
   async function searchLocation() {
     const query = searchQuery.trim();
@@ -649,6 +875,10 @@ export function GefMap({
 
     setSearchResults([result]);
     setFocusedSearchResult(result);
+
+    if (showDinoBoreholes && isRadiusSelectionEnabled) {
+      applyRadiusSelection(L.latLng(result.lat, result.lon));
+    }
   }
 
   return (
@@ -735,16 +965,53 @@ export function GefMap({
               if (next) {
                 setIsRectangleSelectionEnabled(false);
               }
-              setSelectionMessage(next ? t("mapRadiusSelectHint") : null);
+              setSelectionMessage(
+                next
+                  ? showDinoBoreholes
+                    ? dinoText.hint
+                    : t("mapRadiusSelectHint")
+                  : null,
+              );
               return next;
             });
           }}
-          disabled={locations.length === 0}
+          disabled={locations.length === 0 && !showDinoBoreholes}
           className="rounded-sm border border-violet-300 bg-violet-50 px-3 py-2 text-sm text-violet-700 transition-colors hover:bg-violet-100 disabled:cursor-not-allowed disabled:opacity-60"
         >
           {isRadiusSelectionEnabled
             ? t("mapRadiusSelectDisable")
             : t("mapRadiusSelectEnable")}
+        </button>
+
+        <button
+          type="button"
+          onClick={() => {
+            setShowDinoBoreholes((previous) => {
+              const next = !previous;
+
+              if (next) {
+                setIsRectangleSelectionEnabled(false);
+                setIsRadiusSelectionEnabled(true);
+                setSelectionMessage(dinoText.hint);
+
+                const center = radiusSelectionCenterRef.current;
+                if (center) {
+                  window.setTimeout(() => {
+                    void loadDinoBoreholes(center);
+                  }, 0);
+                }
+              }
+
+              return next;
+            });
+          }}
+          className={`rounded-sm border px-3 py-2 text-sm transition-colors ${
+            showDinoBoreholes
+              ? "border-cyan-700 bg-cyan-700 text-white hover:bg-cyan-800"
+              : "border-cyan-300 bg-cyan-50 text-cyan-800 hover:bg-cyan-100"
+          }`}
+        >
+          {showDinoBoreholes ? dinoText.disable : dinoText.enable}
         </button>
 
         <div className="text-xs text-gray-500">
@@ -761,6 +1028,104 @@ export function GefMap({
       {selectionMessage ? (
         <div className="rounded-sm border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-700">
           {selectionMessage}
+        </div>
+      ) : null}
+
+      {showDinoBoreholes ? (
+        <div className="rounded-sm border border-cyan-200 bg-cyan-50/60">
+          <div className="flex items-center justify-between gap-3 border-b border-cyan-100 px-3 py-2 text-xs font-medium text-cyan-900">
+            <span>
+              {isLoadingDinoBoreholes
+                ? dinoText.loading
+                : dinoBoreholes.length > 0
+                  ? dinoText.count(dinoBoreholes.length)
+                  : dinoBoreholeError ?? dinoText.hint}
+            </span>
+            <span className="shrink-0 font-normal text-cyan-700">
+              {dinoText.source}
+            </span>
+          </div>
+
+          {dinoBoreholeError ? (
+            <div className="px-3 py-2 text-xs text-red-700">
+              {dinoBoreholeError}
+            </div>
+          ) : null}
+
+          {!isLoadingDinoBoreholes &&
+          !dinoBoreholeError &&
+          radiusSelectionCenterRef.current &&
+          dinoBoreholes.length === 0 ? (
+            <div className="px-3 py-2 text-xs text-cyan-800">
+              {dinoText.empty}
+            </div>
+          ) : null}
+
+          {dinoResultsTruncated ? (
+            <div className="border-t border-cyan-100 px-3 py-2 text-xs text-amber-700">
+              {dinoText.truncated}
+            </div>
+          ) : null}
+
+          {dinoBoreholes
+            .slice(0, MAX_VISIBLE_DINO_LOCATIONS)
+            .map((location) => (
+              <div
+                key={location.dinoNumber}
+                className="flex items-center gap-3 border-t border-cyan-100 px-3 py-2 text-xs text-gray-700"
+              >
+                <button
+                  type="button"
+                  className="min-w-0 flex-1 truncate text-left font-medium text-cyan-900 hover:underline"
+                  onClick={() => {
+                    const map = mapInstanceRef.current;
+                    const marker = dinoMarkersRef.current.get(location.dinoNumber);
+                    map?.setView(
+                      [location.lat, location.lon],
+                      Math.max(map.getZoom(), SELECTED_LOCATION_ZOOM),
+                    );
+                    marker?.openPopup();
+                  }}
+                >
+                  {location.dinoNumber}
+                </button>
+                <span className="shrink-0 tabular-nums text-gray-500">
+                  {formatDistance(location.distanceKm)}
+                </span>
+                <a
+                  href={createDinoDownloadUrl(
+                    DINO_PROFILE_CSV_DOWNLOAD_BASE_URL,
+                    location.dinoNumber,
+                  )}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="flex shrink-0 items-center gap-1 rounded-sm border border-cyan-200 bg-white px-2 py-1 text-cyan-800 hover:bg-cyan-100"
+                  title={`${location.dinoNumber} CSV`}
+                >
+                  <DownloadIcon size={12} />
+                  {dinoText.csv}
+                </a>
+                <a
+                  href={createDinoDownloadUrl(
+                    DINO_PROFILE_GEF_DOWNLOAD_BASE_URL,
+                    location.dinoNumber,
+                  )}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="flex shrink-0 items-center gap-1 rounded-sm border border-cyan-200 bg-white px-2 py-1 text-cyan-800 hover:bg-cyan-100"
+                  title={`${location.dinoNumber} GEF`}
+                >
+                  <DownloadIcon size={12} />
+                  {dinoText.gef}
+                </a>
+              </div>
+            ))}
+
+          {dinoBoreholes.length > MAX_VISIBLE_DINO_LOCATIONS ? (
+            <div className="border-t border-cyan-100 px-3 py-2 text-[11px] text-cyan-800">
+              {dinoText.more}
+            </div>
+          ) : null}
         </div>
       ) : null}
 
@@ -817,7 +1182,7 @@ export function GefMap({
         </div>
       ) : null}
 
-      {locations.length === 0 ? (
+      {locations.length === 0 && !showDinoBoreholes ? (
         <div className="text-xs text-gray-500">{t("noLocationData")}</div>
       ) : null}
 
@@ -867,6 +1232,147 @@ async function searchOpenStreetMapDirectly(
     lat: Number(result.lat),
     lon: Number(result.lon),
   }));
+}
+
+async function fetchDinoBoreholesWithinRadius(
+  centerLat: number,
+  centerLon: number,
+  radiusKm: number,
+): Promise<{ locations: Array<DinoBoreholeLocation>; truncated: boolean }> {
+  const latitudeDelta = radiusKm / 110.574;
+  const longitudeKilometersPerDegree = Math.max(
+    1,
+    111.32 * Math.cos((centerLat * Math.PI) / 180),
+  );
+  const longitudeDelta = radiusKm / longitudeKilometersPerDegree;
+  const minLat = Math.max(-90, centerLat - latitudeDelta);
+  const maxLat = Math.min(90, centerLat + latitudeDelta);
+  const minLon = Math.max(-180, centerLon - longitudeDelta);
+  const maxLon = Math.min(180, centerLon + longitudeDelta);
+  const collected = new Map<string, DinoBoreholeLocation>();
+  let offset = 0;
+  let truncated = false;
+
+  while (collected.size < DINO_MAX_RESULTS) {
+    const searchParams = new URLSearchParams({
+      f: "geojson",
+      where: "MP_CNT > 0",
+      outFields: "DINO_NR,MP_CNT",
+      returnGeometry: "true",
+      geometry: `${minLon},${minLat},${maxLon},${maxLat}`,
+      geometryType: "esriGeometryEnvelope",
+      inSR: "4326",
+      outSR: "4326",
+      spatialRel: "esriSpatialRelIntersects",
+      resultOffset: String(offset),
+      resultRecordCount: String(DINO_QUERY_PAGE_SIZE),
+      orderByFields: "OBJECT_ID ASC",
+    });
+    const response = await fetch(
+      `${DINO_MAPSERVER_QUERY_URL}?${searchParams.toString()}`,
+      { headers: { Accept: "application/geo+json,application/json" } },
+    );
+
+    if (!response.ok) {
+      throw new Error(`DINOloket MapServer failed with ${response.status}`);
+    }
+
+    const data = (await response.json()) as DinoGeoJsonResponse;
+
+    if (data.error) {
+      throw new Error(
+        `DINOloket MapServer ${data.error.code ?? ""}: ${data.error.message ?? "unknown error"}`,
+      );
+    }
+
+    const features = Array.isArray(data.features) ? data.features : [];
+
+    for (const feature of features) {
+      if (feature.geometry?.type !== "Point") {
+        continue;
+      }
+
+      const [lon, lat] = feature.geometry.coordinates;
+      const dinoNumberValue = feature.properties?.DINO_NR;
+      const dinoNumber =
+        typeof dinoNumberValue === "string" ? dinoNumberValue.trim() : "";
+
+      if (
+        !dinoNumber ||
+        !Number.isFinite(lat) ||
+        !Number.isFinite(lon)
+      ) {
+        continue;
+      }
+
+      const distanceKm = calculateDistanceKm(
+        centerLat,
+        centerLon,
+        lat,
+        lon,
+      );
+
+      if (distanceKm > radiusKm) {
+        continue;
+      }
+
+      const profileCountValue = feature.properties?.MP_CNT;
+      const sampleProfileCount =
+        typeof profileCountValue === "number" &&
+        Number.isFinite(profileCountValue)
+          ? profileCountValue
+          : typeof profileCountValue === "string" &&
+              Number.isFinite(Number(profileCountValue))
+            ? Number(profileCountValue)
+            : null;
+
+      collected.set(dinoNumber, {
+        dinoNumber,
+        lat,
+        lon,
+        sampleProfileCount,
+        distanceKm,
+      });
+
+      if (collected.size >= DINO_MAX_RESULTS) {
+        truncated = true;
+        break;
+      }
+    }
+
+    if (
+      features.length < DINO_QUERY_PAGE_SIZE ||
+      data.exceededTransferLimit === false
+    ) {
+      break;
+    }
+
+    offset += features.length;
+
+    if (features.length === 0) {
+      break;
+    }
+  }
+
+  return {
+    locations: Array.from(collected.values()).sort((left, right) => {
+      const byDistance = left.distanceKm - right.distanceKm;
+      return byDistance !== 0
+        ? byDistance
+        : left.dinoNumber.localeCompare(right.dinoNumber);
+    }),
+    truncated,
+  };
+}
+
+function createDinoDownloadUrl(baseUrl: string, dinoNumber: string): string {
+  return `${baseUrl}/${encodeURIComponent(dinoNumber)}`;
+}
+
+function formatDistance(distanceKm: number): string {
+  return distanceKm < 1
+    ? `${Math.round(distanceKm * 1000)} m`
+    : `${distanceKm.toFixed(1)} km`;
 }
 
 function deduplicateSearchResults(
@@ -930,4 +1436,3 @@ function escapeHtml(value: string): string {
       })[character] ?? character,
   );
 }
-
