@@ -25,6 +25,8 @@ contextBridge.exposeInMainWorld("desktopApi", {
     ipcRenderer.invoke("desktop:save-bore-style", style),
   searchOpenStreetMap: (query, language) =>
     ipcRenderer.invoke("desktop:search-openstreetmap", { query, language }),
+  downloadDinoGef: (dinoNumber) =>
+    ipcRenderer.invoke("desktop:download-dinoloket-gef", dinoNumber),
   savePdfExports: (files) =>
     ipcRenderer.invoke("desktop:save-pdf-exports", files),
   exportSelectedGefFiles: (filenames) =>
