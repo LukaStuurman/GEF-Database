@@ -116,6 +116,7 @@ interface DesktopApi {
       lon: number;
     }>
   >;
+  downloadDinoGef: (dinoNumber: string) => Promise<DesktopFilePayload>;
   savePdfExports: (
     files: Array<{ filename: string; dataBase64: string }>,
   ) => Promise<{ savedCount: number; directory: string | null }>;

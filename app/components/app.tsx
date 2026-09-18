@@ -685,6 +685,35 @@ export function App() {
     }
   }
 
+  async function openDinoGef(dinoNumber: string) {
+    if (!window.desktopApi?.downloadDinoGef) {
+      return;
+    }
+
+    try {
+      const payload = await window.desktopApi.downloadDinoGef(dinoNumber);
+      await handleFiles(
+        [
+          new File([payload.content], payload.name, {
+            type: "text/plain",
+          }),
+        ],
+        {
+          persistToDatabase: false,
+          showPersistStatus: false,
+        },
+      );
+    } catch (error) {
+      console.error(error);
+      mergeFailedFiles([
+        {
+          name: `DINOloket ${dinoNumber}`,
+          error: getErrorMessage(error),
+        },
+      ]);
+    }
+  }
+
   async function handleFiles(
     fileList: FileList | Array<File> | null,
     options: { persistToDatabase?: boolean; showPersistStatus?: boolean } = {},
@@ -1385,6 +1414,9 @@ export function App() {
                 selectedFileName={selectedFileName}
                 selectedPdfFilenames={selectedPdfExportFilenames}
                 onMarkerClick={setSelectedFileName}
+                onOpenDinoGef={(dinoNumber) => {
+                  void openDinoGef(dinoNumber);
+                }}
                 onAddPdfSelection={(filenames) => {
                   setSelectedPdfExportFilenames((previous) =>
                     Array.from(new Set([...previous, ...filenames])).sort(
