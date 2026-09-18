@@ -34,6 +34,8 @@ const DEFAULT_BACKUP_DIRECTORY = path.join(
   "Sonderingen",
   "GEF",
 );
+const DINO_PROFILE_GEF_DOWNLOAD_BASE_URL =
+  "https://www.dinoloket.nl/uitgifteloket/api/brh/gef";
 const OPENSTREETMAP_APP_REFERER = "https://github.com/LukaStuurman/GEF-Database";
 const OPENSTREETMAP_APP_USER_AGENT =
   "GEF Viewer Desktop/1.3.0 (+https://github.com/LukaStuurman/GEF-Database)";
@@ -211,6 +213,61 @@ function getDefaultBackupDirectoryPath() {
   return typeof configuredDirectory === "string" && configuredDirectory.trim()
     ? path.resolve(configuredDirectory)
     : DEFAULT_BACKUP_DIRECTORY;
+}
+
+function getDinoTemporaryDirectoryPath() {
+  return path.join(app.getPath("userData"), "dinoloket");
+}
+
+async function prepareDinoTemporaryDirectory() {
+  const directoryPath = getDinoTemporaryDirectoryPath();
+  await fs.rm(directoryPath, { recursive: true, force: true });
+  await fs.mkdir(directoryPath, { recursive: true });
+  return directoryPath;
+}
+
+async function downloadDinoGefToTemporaryDirectory(dinoNumber) {
+  const normalizedDinoNumber =
+    typeof dinoNumber === "string" ? dinoNumber.trim() : "";
+
+  if (!normalizedDinoNumber || normalizedDinoNumber.length > 200) {
+    throw new Error("Ongeldig DINOloket boormonsternummer.");
+  }
+
+  const downloadUrl =
+    `${DINO_PROFILE_GEF_DOWNLOAD_BASE_URL}/${encodeURIComponent(normalizedDinoNumber)}`;
+  const response = await fetch(downloadUrl, {
+    headers: {
+      Accept: "text/plain, application/octet-stream;q=0.9, */*;q=0.8",
+      Referer: "https://www.dinoloket.nl/",
+    },
+  });
+
+  if (!response.ok) {
+    throw new Error(
+      `DINOloket GEF-download mislukt met HTTP ${response.status}.`,
+    );
+  }
+
+  const buffer = Buffer.from(await response.arrayBuffer());
+
+  if (buffer.length === 0) {
+    throw new Error("DINOloket heeft een leeg GEF-bestand teruggegeven.");
+  }
+
+  const filename = sanitizeGefExportFilename(
+    `${normalizedDinoNumber}.gef`,
+  );
+  const directoryPath = getDinoTemporaryDirectoryPath();
+  const filePath = path.join(directoryPath, filename);
+
+  await ensureDirectoryExists(directoryPath);
+  await fs.writeFile(filePath, buffer);
+
+  return {
+    name: filename,
+    content: buffer.toString("utf8"),
+  };
 }
 
 function getDatabaseDirectoryPath(state) {
@@ -1635,6 +1692,28 @@ function registerDesktopIpc() {
   );
 
   ipcMain.handle(
+    "desktop:download-dinoloket-gef",
+    async (_event, dinoNumber) => {
+      try {
+        const file = await downloadDinoGefToTemporaryDirectory(dinoNumber);
+        await appendDebugLog("dinoloket-gef:downloaded", {
+          dinoNumber,
+          filename: file.name,
+          directory: getDinoTemporaryDirectoryPath(),
+        });
+        return file;
+      } catch (error) {
+        await appendDebugLog("dinoloket-gef:error", {
+          dinoNumber,
+          message: error instanceof Error ? error.message : String(error),
+          stack: error instanceof Error ? error.stack : null,
+        });
+        throw error;
+      }
+    },
+  );
+
+  ipcMain.handle(
     "desktop:export-selected-gef-files",
     async (_event, filenames) => {
       const requestedFilenames = Array.isArray(filenames)
@@ -1823,7 +1902,16 @@ function createMainWindow() {
 }
 
 if (app) {
-  app.whenReady().then(() => {
+  app.whenReady().then(async () => {
+    try {
+      await prepareDinoTemporaryDirectory();
+    } catch (error) {
+      await appendDebugLog("dinoloket-temp-prepare:error", {
+        message: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : null,
+      }).catch(console.error);
+    }
+
     appendDebugLog("app:start", {
       version: app.getVersion(),
       isDev,
