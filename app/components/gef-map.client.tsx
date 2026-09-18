@@ -23,6 +23,7 @@ interface GefMapProps {
   selectedFileName: string | null;
   selectedPdfFilenames: Array<string>;
   onMarkerClick: (filename: string) => void;
+  onOpenDinoGef: (dinoNumber: string) => void;
   onAddPdfSelection: (filenames: Array<string>) => void;
   onSetPdfSelection: (filenames: Array<string>) => void;
 }
@@ -98,6 +99,7 @@ export function GefMap({
   selectedFileName,
   selectedPdfFilenames,
   onMarkerClick,
+  onOpenDinoGef,
   onAddPdfSelection,
   onSetPdfSelection,
 }: GefMapProps) {
@@ -214,6 +216,9 @@ export function GefMap({
       .filter((location) => location.distanceKm <= selectionRadiusKm)
       .sort((left, right) => left.distanceKm - right.distanceKm);
   }, [focusedSearchResult, locations, selectionRadiusKm]);
+  const openDinoGef = useEffectEvent((dinoNumber: string) => {
+    onOpenDinoGef(dinoNumber);
+  });
   const addPdfSelection = useEffectEvent((filenames: Array<string>) => {
     onAddPdfSelection(filenames);
   });
@@ -530,15 +535,34 @@ export function GefMap({
           ? ""
           : `<br/>${escapeHtml(String(location.sampleProfileCount))} ${escapeHtml(dinoText.samples)}`;
 
-      marker.bindPopup(`
-        <div class="text-xs">
-          <strong>${escapeHtml(location.dinoNumber)}</strong><br/>
-          ${escapeHtml(dinoText.source)} · ${formatDistance(location.distanceKm)}${profileCount}<br/>
-          <a href="${escapeHtml(csvUrl)}" target="_blank" rel="noreferrer">${escapeHtml(dinoText.csv)}</a>
-          &nbsp;·&nbsp;
-          <a href="${escapeHtml(gefUrl)}" target="_blank" rel="noreferrer">${escapeHtml(dinoText.gef)}</a>
-        </div>
-      `);
+      const popupContent = document.createElement("div");
+      popupContent.className = "text-xs";
+      popupContent.innerHTML = `
+        <strong>${escapeHtml(location.dinoNumber)}</strong><br/>
+        ${escapeHtml(dinoText.source)} · ${formatDistance(location.distanceKm)}${profileCount}<br/>
+        <a href="${escapeHtml(csvUrl)}" target="_blank" rel="noreferrer">${escapeHtml(dinoText.csv)}</a>
+        &nbsp;·&nbsp;
+        <a
+          href="${escapeHtml(gefUrl)}"
+          target="_blank"
+          rel="noreferrer"
+          data-dinoloket-gef-download
+        >${escapeHtml(dinoText.gef)}</a>
+      `;
+
+      const gefDownloadLink = popupContent.querySelector<HTMLAnchorElement>(
+        "[data-dinoloket-gef-download]",
+      );
+      gefDownloadLink?.addEventListener("click", (event) => {
+        if (!window.desktopApi?.downloadDinoGef) {
+          return;
+        }
+
+        event.preventDefault();
+        openDinoGef(location.dinoNumber);
+      });
+
+      marker.bindPopup(popupContent);
 
       dinoMarkersRef.current.set(location.dinoNumber, marker);
     };
